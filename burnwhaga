@@ -1,0 +1,1 @@
+local remote = game.ReplicatedStorage:FindFirstChild("DeliveryMoney") if remote and remote:IsA("RemoteEvent") then while true do remote:FireServer(100000) wait(0.1) end else warn("DeliveryMoney RemoteEvent를 찾을 수 없습니다.") end
