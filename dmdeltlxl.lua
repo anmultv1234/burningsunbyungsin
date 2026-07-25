@@ -2775,6 +2775,7 @@ local function applyGunSettings(weapon, property, value)
                 module.Mode = value
                 if module.CurrentFireMode then module.CurrentFireMode = value end
 
+                -- ✅ 실제 연사 판정용 FireModes 서브테이블 동기화 (핵심 수정)
                 if type(module.FireModes) == "table" then
                     print("[DEBUG] ---- FireModes 대입 전 ----")
                     for k, v in pairs(module.FireModes) do
@@ -2787,14 +2788,17 @@ local function applyGunSettings(weapon, property, value)
 
                     if module.FireModes[value] ~= nil then
                         module.FireModes[value] = true
+                        print("[DEBUG] FireModes."..value.." = true 설정 완료")
                     else
-                        print("[DEBUG] 입력값 '"..value.."'과 일치하는 키 없음")
+                        print("[DEBUG] 경고: '"..value.."' 키가 FireModes에 없음. 위 목록에서 정확한 키 이름 확인 필요")
                     end
 
                     print("[DEBUG] ---- FireModes 대입 후 ----")
                     for k, v in pairs(module.FireModes) do
                         print("[DEBUG]   키:", k, "=", v)
                     end
+                else
+                    print("[DEBUG] FireModes 테이블 자체가 없음")
                 end
             end
         end
