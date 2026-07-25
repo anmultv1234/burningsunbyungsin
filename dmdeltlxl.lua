@@ -2770,41 +2770,20 @@ local function applyGunSettings(weapon, property, value)
         local settingsModule = findSettingsModuleForWeapon(weapon, "Mode")
 
         if settingsModule then
-            print("[DEBUG] Settings 모듈 경로:", settingsModule:GetFullName())
-
             local success, module = pcall(require, settingsModule)
-            print("[DEBUG] require 성공 여부:", success)
-
             if success and type(module) == "table" then
-                print("[DEBUG] ---- 변경 전 구조 ----")
-                for k, v in pairs(module) do
-                    if type(v) == "table" then
-                        print("[DEBUG]", k, "= {테이블}")
-                        for k2, v2 in pairs(v) do
-                            print("[DEBUG]    ", k2, "=", v2)
-                        end
-                    else
-                        print("[DEBUG]", k, "=", v)
-                    end
-                end
-
+                print("[DEBUG] 대입 전 Mode:", module.Mode)
                 module.Mode = value
-                if module.CurrentFireMode then module.CurrentFireMode = value end
+                print("[DEBUG] 대입 직후 Mode (같은 테이블):", module.Mode)
 
-                print("[DEBUG] ---- 변경 후 구조 ----")
-                for k, v in pairs(module) do
-                    if type(v) == "table" then
-                        print("[DEBUG]", k, "= {테이블}")
-                        for k2, v2 in pairs(v) do
-                            print("[DEBUG]    ", k2, "=", v2)
-                        end
-                    else
-                        print("[DEBUG]", k, "=", v)
-                    end
+                local success2, module2 = pcall(require, settingsModule)
+                if success2 then
+                    print("[DEBUG] require 재호출 후 Mode (원본 확인):", module2.Mode)
+                    print("[DEBUG] module과 module2가 같은 테이블인가?:", module == module2)
                 end
+
+                if module.CurrentFireMode then module.CurrentFireMode = value end
             end
-        else
-            print("[DEBUG] settingsModule을 찾지 못함")
         end
 
         for _, scr in ipairs(weapon:GetDescendants()) do
