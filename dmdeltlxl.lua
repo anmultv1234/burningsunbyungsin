@@ -2775,30 +2775,23 @@ local function applyGunSettings(weapon, property, value)
                 module.Mode = value
                 if module.CurrentFireMode then module.CurrentFireMode = value end
 
-                -- ✅ 실제 연사 판정용 FireModes 서브테이블 동기화 (핵심 수정)
+                -- FireModes 서브테이블 동기화 (표시/판정용)
                 if type(module.FireModes) == "table" then
-                    print("[DEBUG] ---- FireModes 대입 전 ----")
-                    for k, v in pairs(module.FireModes) do
-                        print("[DEBUG]   키:", k, "=", v)
-                    end
-
                     for key in pairs(module.FireModes) do
                         module.FireModes[key] = false
                     end
-
                     if module.FireModes[value] ~= nil then
                         module.FireModes[value] = true
-                        print("[DEBUG] FireModes."..value.." = true 설정 완료")
-                    else
-                        print("[DEBUG] 경고: '"..value.."' 키가 FireModes에 없음. 위 목록에서 정확한 키 이름 확인 필요")
                     end
+                end
 
-                    print("[DEBUG] ---- FireModes 대입 후 ----")
-                    for k, v in pairs(module.FireModes) do
-                        print("[DEBUG]   키:", k, "=", v)
-                    end
-                else
-                    print("[DEBUG] FireModes 테이블 자체가 없음")
+                -- ⭐ 핵심: 서버에 새 Settings 스냅샷을 재전송하기 위한 강제 재장착
+                local character = weapon.Parent
+                if character and character:FindFirstChildOfClass("Humanoid") then
+                    local humanoid = character.Humanoid
+                    humanoid:UnequipTools()
+                    task.wait(0.15)
+                    humanoid:EquipTool(weapon)
                 end
             end
         end
