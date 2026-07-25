@@ -2807,7 +2807,6 @@ local function applyGunSettings(weapon, property, value)
         print("[DEBUG] settingsModule을 찾지 못함")
     end
 
-
         for _, scr in ipairs(weapon:GetDescendants()) do
             if scr:IsA("LocalScript") or scr:IsA("Script") then
                 pcall(function()
