@@ -2772,17 +2772,30 @@ local function applyGunSettings(weapon, property, value)
         if settingsModule then
             local success, module = pcall(require, settingsModule)
             if success and type(module) == "table" then
-                print("[DEBUG] 대입 전 Mode:", module.Mode)
                 module.Mode = value
-                print("[DEBUG] 대입 직후 Mode (같은 테이블):", module.Mode)
-
-                local success2, module2 = pcall(require, settingsModule)
-                if success2 then
-                    print("[DEBUG] require 재호출 후 Mode (원본 확인):", module2.Mode)
-                    print("[DEBUG] module과 module2가 같은 테이블인가?:", module == module2)
-                end
-
                 if module.CurrentFireMode then module.CurrentFireMode = value end
+
+                if type(module.FireModes) == "table" then
+                    print("[DEBUG] ---- FireModes 대입 전 ----")
+                    for k, v in pairs(module.FireModes) do
+                        print("[DEBUG]   키:", k, "=", v)
+                    end
+
+                    for key in pairs(module.FireModes) do
+                        module.FireModes[key] = false
+                    end
+
+                    if module.FireModes[value] ~= nil then
+                        module.FireModes[value] = true
+                    else
+                        print("[DEBUG] 입력값 '"..value.."'과 일치하는 키 없음")
+                    end
+
+                    print("[DEBUG] ---- FireModes 대입 후 ----")
+                    for k, v in pairs(module.FireModes) do
+                        print("[DEBUG]   키:", k, "=", v)
+                    end
+                end
             end
         end
 
