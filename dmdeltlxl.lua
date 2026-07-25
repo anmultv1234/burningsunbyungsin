@@ -2766,46 +2766,46 @@ local function applyGunSettings(weapon, property, value)
     if not (weapon and weapon:IsA("Tool")) then return end
 
     if property == "Mode" then
-    weapon:SetAttribute("Mode", value)
-    local settingsModule = findSettingsModuleForWeapon(weapon, "Mode")
+        weapon:SetAttribute("Mode", value)
+        local settingsModule = findSettingsModuleForWeapon(weapon, "Mode")
 
-    if settingsModule then
-        print("[DEBUG] Settings 모듈 경로:", settingsModule:GetFullName())
+        if settingsModule then
+            print("[DEBUG] Settings 모듈 경로:", settingsModule:GetFullName())
 
-        local success, module = pcall(require, settingsModule)
-        print("[DEBUG] require 성공 여부:", success)
+            local success, module = pcall(require, settingsModule)
+            print("[DEBUG] require 성공 여부:", success)
 
-        if success and type(module) == "table" then
-            print("[DEBUG] ---- 변경 전 구조 ----")
-            for k, v in pairs(module) do
-                if type(v) == "table" then
-                    print("[DEBUG]", k, "= {테이블}")
-                    for k2, v2 in pairs(v) do
-                        print("[DEBUG]    ", k2, "=", v2)
+            if success and type(module) == "table" then
+                print("[DEBUG] ---- 변경 전 구조 ----")
+                for k, v in pairs(module) do
+                    if type(v) == "table" then
+                        print("[DEBUG]", k, "= {테이블}")
+                        for k2, v2 in pairs(v) do
+                            print("[DEBUG]    ", k2, "=", v2)
+                        end
+                    else
+                        print("[DEBUG]", k, "=", v)
                     end
-                else
-                    print("[DEBUG]", k, "=", v)
+                end
+
+                module.Mode = value
+                if module.CurrentFireMode then module.CurrentFireMode = value end
+
+                print("[DEBUG] ---- 변경 후 구조 ----")
+                for k, v in pairs(module) do
+                    if type(v) == "table" then
+                        print("[DEBUG]", k, "= {테이블}")
+                        for k2, v2 in pairs(v) do
+                            print("[DEBUG]    ", k2, "=", v2)
+                        end
+                    else
+                        print("[DEBUG]", k, "=", v)
+                    end
                 end
             end
-
-            module.Mode = value
-            if module.CurrentFireMode then module.CurrentFireMode = value end
-
-            print("[DEBUG] ---- 변경 후 구조 ----")
-            for k, v in pairs(module) do
-                if type(v) == "table" then
-                    print("[DEBUG]", k, "= {테이블}")
-                    for k2, v2 in pairs(v) do
-                        print("[DEBUG]    ", k2, "=", v2)
-                    end
-                else
-                    print("[DEBUG]", k, "=", v)
-                end
-            end
+        else
+            print("[DEBUG] settingsModule을 찾지 못함")
         end
-    else
-        print("[DEBUG] settingsModule을 찾지 못함")
-    end
 
         for _, scr in ipairs(weapon:GetDescendants()) do
             if scr:IsA("LocalScript") or scr:IsA("Script") then
