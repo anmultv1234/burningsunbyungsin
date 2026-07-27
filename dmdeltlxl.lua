@@ -412,6 +412,21 @@ local function onVehicleRemoved(vehicle)
     VehicleCache[vehicle] = nil
 end
 
+local function getVehicleTargetPart(vehicle)
+    if not vehicle then
+        return nil
+    end
+    local cached = VehicleCache[vehicle]
+    if cached and cached:IsA("BasePart") and cached.Parent then
+        return cached
+    end
+    local primary = vehicle.PrimaryPart
+    if primary and primary:IsA("BasePart") then
+        return primary
+    end
+    return vehicle:FindFirstChildWhichIsA("BasePart")
+end
+
 local function setupFolder(folder)
     for _, vehicle in ipairs(folder:GetChildren()) do
         onVehicleAdded(vehicle)
@@ -579,9 +594,10 @@ local function getClosestPlayer(config)
             end
         end
 
-        for vehicle, TargetPart in pairs(VehicleCache) do
+        for vehicle, _ in pairs(VehicleCache) do
             if not vehicle or not vehicle.Parent or IgnoredVehicleInstances[vehicle] then continue end
 
+            local TargetPart = getVehicleTargetPart(vehicle)
             if TargetPart and TargetPart:IsA("BasePart") then
                 local targetDir = (TargetPart.Position - camPos).Unit
                 if lookVector:Dot(targetDir) > 0 then 
@@ -1182,33 +1198,58 @@ RunService.RenderStepped:Connect(function()
 end)
 
 RunService.RenderStepped:Connect(function()
-    if ScriptState.isLockedOn and ScriptState.targetPlayer and ScriptState.targetPlayer.Character then
-        local partName = getBodyPart(ScriptState.targetPlayer.Character, ScriptState.bodyPartSelected)
-        local part = ScriptState.targetPlayer.Character:FindFirstChild(partName)
+    if ScriptState.isLockedOn and ScriptState.targetPlayer then
+        local target = ScriptState.targetPlayer
+        local targetPos
+        local shouldUnlock = false
 
-        if part and ScriptState.targetPlayer.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
-            local predictedPosition = part.Position + (part.AssemblyLinearVelocity * ScriptState.predictionFactor)
+        if not target.Character then
+            local vehPart = getVehicleTargetPart(target)
+            if not vehPart or not vehPart.Parent then
+                shouldUnlock = true
+            else
+                targetPos = vehPart.Position
+                ScriptState.ClosestHitPart = vehPart
+            end
+        else
+            if ScriptState.aimLockTeamCheck and target.Team == LocalPlayer.Team then
+                shouldUnlock = true
+            elseif ScriptState.aimLockVisibleCheck and not IsPlayerVisible(target) then
+                shouldUnlock = true
+            else
+                local partName = getBodyPart(target.Character, ScriptState.bodyPartSelected)
+                local part = target.Character:FindFirstChild(partName)
+                local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
+                if part and humanoid and humanoid.Health > 0 then
+                    targetPos = part.Position + (part.AssemblyLinearVelocity * ScriptState.predictionFactor)
 
-            if ScriptState.antiLockEnabled then
-                if ScriptState.resolverMethod == "Recalculate" then
-                    predictedPosition = predictedPosition + (part.AssemblyLinearVelocity * ScriptState.resolverIntensity)
-                elseif ScriptState.resolverMethod == "Randomize" then
-                    predictedPosition = predictedPosition + Vector3.new(
-                        math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
-                        math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
-                        math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2)
-                    )
-                elseif ScriptState.resolverMethod == "Invert" then
-                    predictedPosition = predictedPosition - (part.AssemblyLinearVelocity * ScriptState.resolverIntensity * 2)
+                    if ScriptState.antiLockEnabled then
+                        if ScriptState.resolverMethod == "Recalculate" then
+                            targetPos = targetPos + (part.AssemblyLinearVelocity * ScriptState.resolverIntensity)
+                        elseif ScriptState.resolverMethod == "Randomize" then
+                            targetPos = targetPos + Vector3.new(
+                                math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
+                                math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
+                                math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2)
+                            )
+                        elseif ScriptState.resolverMethod == "Invert" then
+                            targetPos = targetPos - (part.AssemblyLinearVelocity * ScriptState.resolverIntensity * 2)
+                        end
+                    end
+                else
+                    shouldUnlock = true
                 end
             end
+        end
 
-            local currentCameraPosition = Camera.CFrame.Position
-            Camera.CFrame = CFrame.new(currentCameraPosition, predictedPosition) * CFrame.new(0, 0, ScriptState.smoothingFactor)
-        else
+        if shouldUnlock or not targetPos then
             ScriptState.isLockedOn = false
             ScriptState.targetPlayer = nil
+            return
         end
+
+        local currentCameraPosition = Camera.CFrame.Position
+        Camera.CFrame = CFrame.new(currentCameraPosition, targetPos) * CFrame.new(0, 0, ScriptState.smoothingFactor)
     end
 end)
 
@@ -1727,13 +1768,11 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
 
     if Toggles.silentAimEnabled and Toggles.silentAimEnabled.Value and self == workspace and not checkcaller() and chance and allowedFireCall then
         local HitPart = ScriptState.ClosestHitPart or getClosestPlayer()
-        
-        if not HitPart then
+        if not HitPart or typeof(HitPart) ~= "Instance" or not HitPart:IsA("BasePart") then
             return oldNamecall(...)
         end
 
-        if HitPart then
-            local ignoredList = getIgnoredList()
+        local ignoredList = getIgnoredList()
             local originOptions = SilentAimSettings.Origin
             local includeOptions = SilentAimSettings.Include
             local originalOrigin = getOriginalOrigin()
