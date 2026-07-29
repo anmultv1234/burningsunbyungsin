@@ -1,3 +1,5 @@
+getgenv().bypass_adonis = true
+
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -85,13 +87,15 @@ if not getgenv().ScriptState then
         isNoClipActive = false,
         flySpeed = 1,
         Cmultiplier = 1,
-        strafeEnabled = false,
-        strafeSpeed = 50,
-        strafeRadius = 5,
-        strafeMode = "Horizontal",
-        strafeTargetPart = nil,
-        originalCameraMode = nil,
-        LastUpdate = 0
+        HitboxEnabled = false,
+        HitboxSize = 10,
+        AAC_State = "Idle",
+        AAC_ShieldName = "",
+        AAC_GunName = "",
+        Spoof_Enabled = false,
+        Spoof_Mode = "Auto",
+        Spoof_FireRate = 8888,
+        Spoof_Bullets = 1
     }
 end
 
@@ -99,7 +103,7 @@ local ScriptState = getgenv().ScriptState
 
 local SilentAimSettings = {
     Enabled = false,
-    ClassName = "FinalRound  |  anmultv1234",
+    ClassName = "anmultv1234",
     ToggleKey = "None",
     KeyMode = "Toggle",
     TeamCheck = false,
@@ -128,6 +132,7 @@ local Services = {
     RunService = game:GetService("RunService"),
     GuiService = game:GetService("GuiService"),
     UserInputService = game:GetService("UserInputService"),
+    VirtualInputManager = game:GetService("VirtualInputManager"),
     HttpService = game:GetService("HttpService"),
     ReplicatedStorage = game:GetService("ReplicatedStorage"),
     Lighting = game:GetService("Lighting"),
@@ -138,6 +143,7 @@ local Players = Services.Players
 local RunService = Services.RunService
 local GuiService = Services.GuiService
 local UserInputService = Services.UserInputService
+local VIM = Services.VirtualInputManager
 local HttpService = Services.HttpService
 local ReplicatedStorage = Services.ReplicatedStorage
 local SoundService = Services.SoundService
@@ -373,8 +379,10 @@ SilentAimSettings.Include = normalizeSelection(SilentAimSettings.Include)
 SilentAimSettings.Origin = normalizeSelection(SilentAimSettings.Origin)
 
 local VehicleCache = {}
+local VehicleDrawings = {}
 
 local function onVehicleAdded(vehicle)
+    getgenv().testvehicle = vehicle
     task.spawn(function()
         task.wait(0.1)
         if not vehicle or not vehicle.Parent then return end
@@ -383,7 +391,7 @@ local function onVehicleAdded(vehicle)
         local TargetPart = vehicle:FindFirstChild(vehiclePartOption, true)
         
         if not TargetPart then
-            for _, pName in ipairs({"TargetPart", "PropellerBase", "PrimaryPart", "RudderPivotBase"}) do
+            for _, pName in ipairs({"TargetPart", "BoatPivot", "PropellerBase", "PrimaryPart", "RudderPivotBase"}) do
                 TargetPart = vehicle:FindFirstChild(pName, true)
                 if TargetPart then break end
             end
@@ -404,27 +412,33 @@ local function onVehicleAdded(vehicle)
         
         if TargetPart and TargetPart:IsA("BasePart") then
             VehicleCache[vehicle] = TargetPart
+            
+            if typeof(Drawing) == "table" and typeof(Drawing.new) == "function" then
+                if not VehicleDrawings[vehicle] then
+                    local d = Drawing.new("Text")
+                    d.Center = true
+                    d.Outline = true
+                    d.Color = Color3.new(1, 1, 1)
+                    d.Size = 13
+                    if Drawing.Fonts and Drawing.Fonts.Monospace then
+                        d.Font = Drawing.Fonts.Monospace
+                    else
+                        d.Font = 3
+                    end
+                    d.Visible = false
+                    VehicleDrawings[vehicle] = d
+                end
+            end
         end
     end)
 end
 
 local function onVehicleRemoved(vehicle)
     VehicleCache[vehicle] = nil
-end
-
-local function getVehicleTargetPart(vehicle)
-    if not vehicle then
-        return nil
+    if VehicleDrawings[vehicle] then
+        VehicleDrawings[vehicle]:Destroy()
+        VehicleDrawings[vehicle] = nil
     end
-    local cached = VehicleCache[vehicle]
-    if cached and cached:IsA("BasePart") and cached.Parent then
-        return cached
-    end
-    local primary = vehicle.PrimaryPart
-    if primary and primary:IsA("BasePart") then
-        return primary
-    end
-    return vehicle:FindFirstChildWhichIsA("BasePart")
 end
 
 local function setupFolder(folder)
@@ -478,7 +492,6 @@ local function getClosestPlayer(config)
     config = config or {}
 
     local targetPartOption = config.targetPart or (Options and Options.TargetPart and Options.TargetPart.Value) or SilentAimSettings.TargetPart
-    local vehiclePartOption = SilentAimSettings.VehicleTargetPart
     if not targetPartOption then
         return nil, nil
     end
@@ -573,31 +586,43 @@ local function getClosestPlayer(config)
             end
         end
     end
-    
+
     if SilentAimSettings.TargetVehicles or (ScriptState and ScriptState.targetVehicles) then
         local camPos = Camera.CFrame.Position
         local lookVector = Camera.CFrame.LookVector
+        local myChar = LocalPlayer.Character
+        local myRoot = myChar and (myChar:FindFirstChild("HumanoidRootPart") or myChar.PrimaryPart)
         
-        local IgnoredVehicleInstances = {}
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p == LocalPlayer or (ignoredPlayers and ignoredPlayers[p.Name]) then
-                local char = p.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if hum and hum.SeatPart then
-                    for vehicle in pairs(VehicleCache) do
-                        if hum.SeatPart:IsDescendantOf(vehicle) then
-                            IgnoredVehicleInstances[vehicle] = true
-                            break
-                        end
+        for vehicle, TargetPart in pairs(VehicleCache) do
+            if not vehicle or not vehicle.Parent then continue end
+
+            local isMyVehicle = false
+            local vName = vehicle.Name
+            
+            if vName == LocalPlayer.Name or string.find(vName, LocalPlayer.Name) then
+                isMyVehicle = true
+            end
+
+            if not isMyVehicle and ignoredPlayers then
+                for ignoredName, _ in pairs(ignoredPlayers) do
+                    if vName == ignoredName or string.find(vName, ignoredName) then
+                        isMyVehicle = true
+                        break
                     end
                 end
             end
-        end
 
-        for vehicle, _ in pairs(VehicleCache) do
-            if not vehicle or not vehicle.Parent or IgnoredVehicleInstances[vehicle] then continue end
+            if TargetPart and myRoot then
+                local distanceToVehicle = (TargetPart.Position - myRoot.Position).Magnitude
+                if distanceToVehicle < 25 then
+                    isMyVehicle = true
+                end
+            end
 
-            local TargetPart = getVehicleTargetPart(vehicle)
+            if isMyVehicle then 
+                continue 
+            end
+
             if TargetPart and TargetPart:IsA("BasePart") then
                 local targetDir = (TargetPart.Position - camPos).Unit
                 if lookVector:Dot(targetDir) > 0 then 
@@ -697,8 +722,22 @@ RunService.RenderStepped:Connect(function()
 
         if part and ScriptState.targetPlayer.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
             local predictedPosition = part.Position + (part.AssemblyLinearVelocity * ScriptState.predictionFactor)
-            local currentCameraPosition = Camera.CFrame.Position
 
+            if ScriptState.antiLockEnabled then
+                if ScriptState.resolverMethod == "Recalculate" then
+                    predictedPosition = predictedPosition + (part.AssemblyLinearVelocity * ScriptState.resolverIntensity)
+                elseif ScriptState.resolverMethod == "Randomize" then
+                    predictedPosition = predictedPosition + Vector3.new(
+                        math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
+                        math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
+                        math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2)
+                    )
+                elseif ScriptState.resolverMethod == "Invert" then
+                    predictedPosition = predictedPosition - (part.AssemblyLinearVelocity * ScriptState.resolverIntensity * 2)
+                end
+            end
+
+            local currentCameraPosition = Camera.CFrame.Position
             Camera.CFrame = CFrame.new(currentCameraPosition, predictedPosition) * CFrame.new(0, 0, ScriptState.smoothingFactor)
         else
             ScriptState.isLockedOn = false
@@ -707,11 +746,11 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/anmultv1234/FinalRound/refs/heads/main/Mobile_Lib.lua"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/anmultv1234/FinalRoundUI-Lib/refs/heads/main/%E2%80%8BPasteWareUIlib.lua"))()
 local ThemeManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/anmultv1234/FinalRoundUI-Lib/refs/heads/main/%E2%80%8Bmanage2.lua"))()
 local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/anmultv1234/FinalRoundUI-Lib/refs/heads/main/%E2%80%8Bmanager.lua"))()
 local Window = Library:CreateWindow({
-    Title = 'FinalRound  |  anmultv1234',
+    Title = 'anmultv1234',
     Center = true,
     AutoShow = true,
     TabPadding = 8,
@@ -722,217 +761,33 @@ local GeneralTab = Window:AddTab("Main")
 local aimbox = GeneralTab:AddRightGroupbox("AimLock")
 local velbox = GeneralTab:AddRightGroupbox("Anti Lock")
 local frabox = GeneralTab:AddRightGroupbox("Movement")
-local ragebox = GeneralTab:AddLeftGroupbox("Rage")
 local ExploitTab = Window:AddTab("Exploits")
 local ACSEngineBox = ExploitTab:AddLeftGroupbox("ACS Engine")
 local VehicleModBox = ExploitTab:AddRightGroupbox("Vehicle Modifier")
 local VisualsTab = Window:AddTab("Visuals")
 local settingsTab = Window:AddTab("Settings")
+local RageTab = Window:AddTab("Rage")
+
 local MenuGroup = settingsTab:AddLeftGroupbox("Menu")
 MenuGroup:AddButton("Unload", function() Library:Unload() end)
 MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "None", NoUI = true, Text = "Menu keybind" })
+MenuGroup:AddToggle("ShowKeybinds", {
+    Text = "Show Keybinds",
+    Default = Library.KeybindFrame and Library.KeybindFrame.Visible or false,
+    Callback = function(value)
+        Library:SetKeybindListVisible(value)
+    end,
+})
+
+if Library.KeybindFrame and Toggles.ShowKeybinds then
+    Library:SetKeybindListVisible(Toggles.ShowKeybinds.Value)
+end
 
 Library.ToggleKeybind = Options.MenuKeybind
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
 ThemeManager:ApplyToTab(settingsTab)
 SaveManager:BuildConfigSection(settingsTab)
-
-local ScreenGui = Instance.new("ScreenGui")
-local OpenButton = Instance.new("TextButton")
-ScreenGui.Parent = game.CoreGui
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-OpenButton.Parent = ScreenGui
-OpenButton.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-OpenButton.Size = UDim2.new(0, 80, 0, 30)
-OpenButton.Position = UDim2.new(1, -100, 0.5, -15)
-OpenButton.Text = "OPEN"
-OpenButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-OpenButton.Font = Enum.Font.Code
-OpenButton.TextSize = 14
-OpenButton.BorderSizePixel = 0
-OpenButton.Active = true
-
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Thickness = 1.5
-UIStroke.Color = Color3.fromRGB(0, 110, 255)
-UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-UIStroke.Parent = OpenButton
-
-OpenButton.MouseButton1Click:Connect(function()
-    Library:Toggle()
-end)
-
-local dragging, dragInput, dragStart, startPos
-local function update(input)
-    local delta = input.Position - dragStart
-    OpenButton.Position = UDim2.new(
-        startPos.X.Scale,
-        startPos.X.Offset + delta.X,
-        startPos.Y.Scale,
-        startPos.Y.Offset + delta.Y
-    )
-end
-
-OpenButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = OpenButton.Position
-
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
-end)
-
-OpenButton.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-
-game:GetService("UserInputService").InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        update(input)
-    end
-end)
-
-local AimLockButton = Instance.new("TextButton")
-AimLockButton.Parent = ScreenGui
-AimLockButton.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-AimLockButton.Size = UDim2.new(0, 80, 0, 30)
-AimLockButton.Position = UDim2.new(1, -100, 0.5, 25)
-AimLockButton.Text = "AIMLOCK"
-AimLockButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-AimLockButton.Font = Enum.Font.Code
-AimLockButton.TextSize = 14
-AimLockButton.BorderSizePixel = 0
-AimLockButton.Active = true
-
-local AimLockUIStroke = Instance.new("UIStroke")
-AimLockUIStroke.Thickness = 1.5
-AimLockUIStroke.Color = Color3.fromRGB(255, 0, 0)
-AimLockUIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-AimLockUIStroke.Parent = AimLockButton
-
-AimLockButton.MouseButton1Click:Connect(function()
-    local newState = not ScriptState.lockEnabled
-    toggleLockOnPlayer(newState)
-    if ScriptState.lockEnabled then
-        AimLockUIStroke.Color = Color3.fromRGB(0, 255, 0)
-    else
-        AimLockUIStroke.Color = Color3.fromRGB(255, 0, 0)
-    end
-end)
-
-local aimDragging, aimDragInput, aimDragStart, aimStartPos
-local function aimUpdate(input)
-    local delta = input.Position - aimDragStart
-    AimLockButton.Position = UDim2.new(
-        aimStartPos.X.Scale,
-        aimStartPos.X.Offset + delta.X,
-        aimStartPos.Y.Scale,
-        aimStartPos.Y.Offset + delta.Y
-    )
-end
-
-AimLockButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        aimDragging = true
-        aimDragStart = input.Position
-        aimStartPos = AimLockButton.Position
-
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                aimDragging = false
-            end
-        end)
-    end
-end)
-
-AimLockButton.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        aimDragInput = input
-    end
-end)
-
-game:GetService("UserInputService").InputChanged:Connect(function(input)
-    if input == dragInput and aimDragging then
-        aimUpdate(input)
-    end
-end)
-
-local SilentAimButton = Instance.new("TextButton")
-SilentAimButton.Parent = ScreenGui
-SilentAimButton.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-SilentAimButton.Size = UDim2.new(0, 80, 0, 30)
-SilentAimButton.Position = UDim2.new(1, -100, 0.5, 65)
-SilentAimButton.Text = "SILENTAIM"
-SilentAimButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-SilentAimButton.Font = Enum.Font.Code
-SilentAimButton.TextSize = 14
-SilentAimButton.BorderSizePixel = 0
-SilentAimButton.Active = true
-
-local SilentAimUIStroke = Instance.new("UIStroke")
-SilentAimUIStroke.Thickness = 1.5
-SilentAimUIStroke.Color = Color3.fromRGB(255, 0, 0)
-SilentAimUIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-SilentAimUIStroke.Parent = SilentAimButton
-
-SilentAimButton.MouseButton1Click:Connect(function()
-    local newState = not SilentAimSettings.Enabled
-    SilentAimSettings.Enabled = newState
-    if Toggles and Toggles.silentAimEnabled then
-        Toggles.silentAimEnabled:SetValue(newState)
-    end
-    if SilentAimSettings.Enabled then
-        SilentAimUIStroke.Color = Color3.fromRGB(0, 255, 0)
-    else
-        SilentAimUIStroke.Color = Color3.fromRGB(255, 0, 0)
-    end
-end)
-
-local saDragging, saDragInput, saDragStart, saStartPos
-local function saUpdate(input)
-    local delta = input.Position - saDragStart
-    SilentAimButton.Position = UDim2.new(
-        saStartPos.X.Scale,
-        saStartPos.X.Offset + delta.X,
-        saStartPos.Y.Scale,
-        saStartPos.Y.Offset + delta.Y
-    )
-end
-
-SilentAimButton.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        saDragging = true
-        saDragStart = input.Position
-        saStartPos = SilentAimButton.Position
-
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                saDragging = false
-            end
-        end)
-    end
-end)
-
-SilentAimButton.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        saDragInput = input
-    end
-end)
-
-game:GetService("UserInputService").InputChanged:Connect(function(input)
-    if input == saDragInput and saDragging then
-        saUpdate(input)
-    end
-end)
 
 local lastAimLockKeyState = false
 local lastAimLockKeyMode = ScriptState.aimLockKeyMode
@@ -1123,136 +978,6 @@ velbox:AddSlider("ReverseResolveIntensity", {
     end
 })
 
-getgenv().config = getgenv().config or {}
-getgenv().config.killRange = getgenv().config.killRange or 100
-ScriptState.rageEnabled = false
-
-ragebox:AddToggle("rageEnabledToggle", {
-    Text = "Rage Mode",
-    Default = false,
-    Callback = function(value)
-        ScriptState.rageEnabled = value
-    end
-})
-
-ragebox:AddSlider("killRangeSlider", {
-    Text = "Kill Range",
-    Default = 100,
-    Min = 10,
-    Max = 1000,
-    Rounding = 0,
-    Callback = function(value)
-        getgenv().config.killRange = value
-    end
-})
-
-local utils = {}
-function utils.desyncTo(meRoot, targetRoot)
-    if meRoot and targetRoot then
-        local originalVelocity = meRoot.Velocity
-        local direction = (targetRoot.Position - meRoot.Position).Unit
-        meRoot.Velocity = direction * ((ScriptState.reverseResolveIntensity or 5) * 1000)
-        RunService.RenderStepped:Wait()
-        meRoot.Velocity = originalVelocity
-    end
-end
-
-RunService.RenderStepped:Connect(function()
-    if ScriptState.rageEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local me = { rootpart = LocalPlayer.Character.HumanoidRootPart }
-        local targets = {}
-        
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer and player.Character then
-                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
-                local head = player.Character:FindFirstChild("Head")
-                local rootpart = humanoid and humanoid.RootPart
-                
-                if head and rootpart and humanoid.Health > 0 then
-                    local distance = (me.rootpart.Position - rootpart.Position).Magnitude
-                    if distance <= (getgenv().config.killRange or 100) then
-                        table.insert(targets, {
-                            head = head,
-                            rootpart = rootpart,
-                            player = player
-                        })
-                    end
-                end
-            end
-        end
-        
-        if #targets > 0 then
-            for _, target in ipairs(targets) do
-                utils.desyncTo(me.rootpart, target.rootpart)
-                ScriptState.ClosestHitPart = target.head
-                
-                if getgenv().WeaponOnHands then
-                    local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-                    if tool then
-                        tool:Activate()
-                    end
-                end
-            end
-        end
-    end
-end)
-
-RunService.RenderStepped:Connect(function()
-    if ScriptState.isLockedOn and ScriptState.targetPlayer then
-        local target = ScriptState.targetPlayer
-        local targetPos
-        local shouldUnlock = false
-
-        if not target.Character then
-            local vehPart = getVehicleTargetPart(target)
-            if not vehPart or not vehPart.Parent then
-                shouldUnlock = true
-            else
-                targetPos = vehPart.Position
-                ScriptState.ClosestHitPart = vehPart
-            end
-        else
-            if ScriptState.aimLockTeamCheck and target.Team == LocalPlayer.Team then
-                shouldUnlock = true
-            elseif ScriptState.aimLockVisibleCheck and not IsPlayerVisible(target) then
-                shouldUnlock = true
-            else
-                local partName = getBodyPart(target.Character, ScriptState.bodyPartSelected)
-                local part = target.Character:FindFirstChild(partName)
-                local humanoid = target.Character:FindFirstChildOfClass("Humanoid")
-                if part and humanoid and humanoid.Health > 0 then
-                    targetPos = part.Position + (part.AssemblyLinearVelocity * ScriptState.predictionFactor)
-
-                    if ScriptState.antiLockEnabled then
-                        if ScriptState.resolverMethod == "Recalculate" then
-                            targetPos = targetPos + (part.AssemblyLinearVelocity * ScriptState.resolverIntensity)
-                        elseif ScriptState.resolverMethod == "Randomize" then
-                            targetPos = targetPos + Vector3.new(
-                                math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
-                                math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2),
-                                math.random() * ScriptState.resolverIntensity - (ScriptState.resolverIntensity / 2)
-                            )
-                        elseif ScriptState.resolverMethod == "Invert" then
-                            targetPos = targetPos - (part.AssemblyLinearVelocity * ScriptState.resolverIntensity * 2)
-                        end
-                    end
-                else
-                    shouldUnlock = true
-                end
-            end
-        end
-
-        if shouldUnlock or not targetPos then
-            ScriptState.isLockedOn = false
-            ScriptState.targetPlayer = nil
-            return
-        end
-
-        local currentCameraPosition = Camera.CFrame.Position
-        Camera.CFrame = CFrame.new(currentCameraPosition, targetPos) * CFrame.new(0, 0, ScriptState.smoothingFactor)
-    end
-end)
-
 aimbox:AddToggle("antiLock_Enabled", {
     Text = "Anti Lock Resolver",
     Default = false,
@@ -1293,9 +1018,6 @@ local silentAimToggle = Main:AddToggle("silentAimEnabled", {
     Default = SilentAimSettings.Enabled,
     Callback = function(value)
         SilentAimSettings.Enabled = value
-        if SilentAimUIStroke then
-            SilentAimUIStroke.Color = value and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-        end
     end
 })
 
@@ -1348,6 +1070,21 @@ Main:AddToggle("TargetVehicles", {
     SilentAimSettings.TargetVehicles = Toggles.TargetVehicles.Value
 end)
 
+Main:AddDropdown("VehicleTargetPart", {
+    AllowNull = false,
+    Text = "Vehicle Target Part",
+    Default = "TargetPart",
+    Values = {
+        "TargetPart", 
+        "BoatPivot",
+        "PropellerBase", 
+        "PrimaryPart",
+        "RudderPivotBase"
+    }
+}):OnChanged(function()
+    SilentAimSettings.VehicleTargetPart = Options.VehicleTargetPart.Value
+end)
+
 Main:AddToggle("BulletTP", {
     Text = "Bullet Teleport",
     Default = SilentAimSettings.BulletTP,
@@ -1371,15 +1108,6 @@ Main:AddDropdown("TargetPart", {
     Values = {"Head", "HumanoidRootPart", "None", "Random"}
 }):OnChanged(function()
     SilentAimSettings.TargetPart = Options.TargetPart.Value
-end)
-
-Main:AddDropdown("VehicleTargetPart", {
-    AllowNull = false,
-    Text = "Vehicle Target Part",
-    Default = "TargetPart",
-    Values = {"TargetPart", "PropellerBase", "PrimaryPart", "RudderPivotBase"}
-}):OnChanged(function()
-    SilentAimSettings.VehicleTargetPart = Options.VehicleTargetPart.Value
 end)
 
 Main:AddDropdown("Method", {
@@ -1509,9 +1237,28 @@ local FieldOfViewBOX = GeneralTab:AddLeftTabbox("Field Of View") do
         Tooltip = "Friend list",
         Multi = true
     })
-end
 
-local VehicleDrawings = {}
+    Main:AddToggle("HitboxToggle", {
+        Text = "Hitbox Expander",
+        Default = ScriptState.HitboxEnabled,
+        Tooltip = "Expands player head size",
+        Callback = function(value)
+            ScriptState.HitboxEnabled = value
+        end
+    })
+
+    Main:AddSlider("HitboxSize", {
+        Text = "Hitbox Size",
+        Default = ScriptState.HitboxSize,
+        Min = 1,
+        Max = 20,
+        Rounding = 0,
+        Tooltip = "Adjust hitbox size",
+        Callback = function(value)
+            ScriptState.HitboxSize = value
+        end
+    })
+end
 
 local function removeOldHighlight()
     if ScriptState.previousHighlight then
@@ -1532,31 +1279,37 @@ task.spawn(function()
                 teamCheck = teamCheckActive,
                 aliveCheck = aliveCheckActive
             })
+            
             if closestPart and closestPlayer then
-                local char = closestPlayer.Character or closestPart.Parent
-                if char and char:FindFirstChild("Humanoid") and char:FindFirstChild("HumanoidRootPart") then
-                    if teamCheckActive and playersOnSameTeam(closestPlayer) then
-                        removeOldHighlight()
-                        return
+                local isVehicle = (typeof(closestPlayer) == "Instance" and not closestPlayer:IsA("Player"))
+                local targetModel = isVehicle and closestPlayer or closestPlayer.Character
+                
+                if targetModel then
+                    if not isVehicle then
+                        if teamCheckActive and playersOnSameTeam(closestPlayer) then
+                            removeOldHighlight()
+                            return
+                        end
+                        if visibleCheckActive and not IsPlayerVisible(closestPlayer) then
+                            removeOldHighlight()
+                            return
+                        end
+                        if SilentAimSettings.VisibleCheck and not IsPlayerVisible(closestPlayer) then
+                            removeOldHighlight()
+                            return
+                        end
                     end
-                    if visibleCheckActive and not IsPlayerVisible(closestPlayer) then
-                        removeOldHighlight()
-                        return
-                    end
-                    if SilentAimSettings.VisibleCheck and not IsPlayerVisible(closestPlayer) then
-                        removeOldHighlight()
-                        return
-                    end
-                    local Root = char.PrimaryPart or char:FindFirstChild("HumanoidRootPart")
+                    
+                    local Root = targetModel.PrimaryPart or targetModel:FindFirstChild("HumanoidRootPart") or closestPart
                     if Root then
                         local RootToViewportPoint, IsOnScreen = WorldToViewportPoint(Camera, Root.Position)
                         removeOldHighlight()
                         if IsOnScreen then
-                            local highlight = char:FindFirstChildOfClass("Highlight")
+                            local highlight = targetModel:FindFirstChildOfClass("Highlight")
                             if not highlight then
                                 highlight = Instance.new("Highlight")
-                                highlight.Parent = char
-                                highlight.Adornee = char
+                                highlight.Parent = targetModel
+                                highlight.Adornee = targetModel
                             end
                             highlight.FillColor = Options.MouseVisualizeColor.Value
                             highlight.FillTransparency = 0.5
@@ -1565,6 +1318,8 @@ task.spawn(function()
                             ScriptState.previousHighlight = highlight
                         end
                     end
+                else
+                    removeOldHighlight()
                 end
             else
                 removeOldHighlight()
@@ -1577,44 +1332,49 @@ task.spawn(function()
             end
             fov_circle.Position = getFovOrigin()
         end
-        
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                local hasDrawing = typeof(Drawing) == "table" and typeof(Drawing.new) == "function"
-                if hasDrawing then
-                    if not VehicleDrawings[player] then
-                        local d = Drawing.new("Text")
-                        d.Center = true
-                        d.Outline = true
-                        d.Color = Color3.new(1, 1, 1)
-                        d.Size = 16
-                        d.Visible = false
-                        VehicleDrawings[player] = d
-                    end
-                    
-                    local d = VehicleDrawings[player]
-                    local ESP_Global = getgenv().ExunysDeveloperESP
-                    local espProps = ESP_Global and ESP_Global.Properties and ESP_Global.Properties.ESP
-                    local showVehicle = espProps and espProps.DisplayVehicle
-                    local espOn = ESP_Global and ESP_Global.Settings and ESP_Global.Settings.Enabled
 
-                    if showVehicle and espOn and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                        local vName = GetPlayerVehicle(player)
-                        if vName then
-                            local pos, onScreen = Camera:WorldToViewportPoint(player.Character.HumanoidRootPart.Position - Vector3.new(0, 4, 0))
-                            if onScreen then
-                                d.Text = "[" .. vName .. "]"
-                                d.Position = Vector2.new(pos.X, pos.Y)
-                                d.Visible = true
-                            else
-                                d.Visible = false
-                            end
-                        else
-                            d.Visible = false
-                        end
-                    else
-                        if d then d.Visible = false end
+        if ScriptState.HitboxEnabled then
+            for _, v in pairs(Players:GetPlayers()) do
+                if v ~= LocalPlayer and v.Character and v.Character:FindFirstChild("Head") then
+                    local part = v.Character.Head
+                    if part:IsA("BasePart") then
+                        pcall(function()
+                            part.Size = Vector3.new(ScriptState.HitboxSize, ScriptState.HitboxSize, ScriptState.HitboxSize)
+                            part.Transparency = 0.9
+                            part.Color = Color3.fromRGB(255, 255, 255)
+                            part.Material = Enum.Material.Neon
+                            part.CanCollide = false
+                            part.Massless = true
+                        end)
                     end
+                end
+            end
+        end
+        
+        local ESP_Global = getgenv().ExunysDeveloperESP
+        local espProps = ESP_Global and ESP_Global.Properties and ESP_Global.Properties.ESP
+        local showVehicle = espProps and espProps.DisplayVehicle
+
+        for vehicle, targetPart in pairs(VehicleCache) do
+            local d = VehicleDrawings[vehicle]
+            if d then
+                if showVehicle and vehicle and vehicle.Parent and targetPart and targetPart:IsA("BasePart") then
+                    local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    if onScreen then
+                        d.Text = "[" .. vehicle.Name .. "]"
+                        d.Position = Vector2.new(pos.X, pos.Y)
+                        if espProps then
+                            d.Size = espProps.Size or 13
+                            d.Font = espProps.Font or ((Drawing.Fonts and Drawing.Fonts.Monospace) or 3)
+                            if espProps.Color then d.Color = espProps.Color end
+                            if espProps.Outline ~= nil then d.Outline = espProps.Outline end
+                        end
+                        d.Visible = true
+                    else
+                        d.Visible = false
+                    end
+                else
+                    d.Visible = false
                 end
             end
         end
@@ -1708,7 +1468,7 @@ for _, plr in ipairs(Players:GetPlayers()) do
 end
 Players.PlayerAdded:Connect(trackPlayer)
 
-RunService.RenderStepped:Connect(function()
+RunService.Heartbeat:Connect(function()
     if Toggles.silentAimEnabled and Toggles.silentAimEnabled.Value then
         local closestPart = getClosestPlayer()
         ScriptState.ClosestHitPart = closestPart
@@ -1721,6 +1481,20 @@ local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
     local Method, Arguments = getnamecallmethod(), {...}
     local self, chance = Arguments[1], CalculateChance(SilentAimSettings.HitChance)
+
+    if Method == "FireServer" and ScriptState.Spoof_Enabled then
+        if self.Name == "BulletHit" then
+            if type(Arguments[6]) == "table" then
+                Arguments[6].Mode = ScriptState.Spoof_Mode or "Auto"
+                Arguments[6].FireRate = ScriptState.Spoof_FireRate or 8888
+                Arguments[6].MaxSpread = 0
+                Arguments[6].MaxRecoilPower = 0
+                Arguments[6].Distance = 25000
+                Arguments[6].BSpeed = 10000
+            end
+            return oldNamecall(unpack(Arguments))
+        end
+    end
 
     local BlockedMethods = SilentAimSettings.BlockedMethods or {}
     if Method == "Destroy" and self == Client then
@@ -1768,11 +1542,35 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
 
     if Toggles.silentAimEnabled and Toggles.silentAimEnabled.Value and self == workspace and not checkcaller() and chance and allowedFireCall then
         local HitPart = ScriptState.ClosestHitPart or getClosestPlayer()
-        if not HitPart or typeof(HitPart) ~= "Instance" or not HitPart:IsA("BasePart") then
+        
+        if not HitPart or typeof(HitPart) ~= "Instance" or not HitPart.Parent then
             return oldNamecall(...)
         end
+        
+        local myVehicleName = GetPlayerVehicle(LocalPlayer)
+        if myVehicleName then
+            local isInMyVehicle = false
+            for veh, _ in pairs(VehicleCache) do
+                if typeof(veh) == "Instance" and veh.Name == myVehicleName and HitPart:IsDescendantOf(veh) then
+                    isInMyVehicle = true
+                    break
+                end
+            end
+            if isInMyVehicle then
+                return oldNamecall(...)
+            end
+        end
+        
+        local isVehicleTarget = SilentAimSettings.TargetVehicles or (ScriptState and ScriptState.targetVehicles) or (typeof(HitPart) == "Instance" and HitPart.Parent and not HitPart.Parent:FindFirstChildOfClass("Humanoid"))
+        if isVehicleTarget then
+            local trace = tostring(debug.traceback()):lower()
+            if not (trace:find("bullet") or trace:find("gun") or trace:find("fire") or trace:find("shoot") or trace:find("turret")) then
+                return oldNamecall(...)
+            end
+        end
 
-        local ignoredList = getIgnoredList()
+        if HitPart then
+            local ignoredList = getIgnoredList()
             local originOptions = SilentAimSettings.Origin
             local includeOptions = SilentAimSettings.Include
             local originalOrigin = getOriginalOrigin()
@@ -1810,46 +1608,30 @@ oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(...)
                 return adjustedOrigin, direction
             end
 
-            if Method == "FindPartOnRayWithIgnoreList" and SilentAimSettings.SilentAimMethod == Method then
-                if ValidateArguments(Arguments, ExpectedArguments.FindPartOnRayWithIgnoreList) then
-                    local Origin, Direction = computeRay(Arguments[2].Origin)
-                    Arguments[2] = Ray.new(Origin, Direction)
-                    return oldNamecall(unpack(Arguments))
-                end
-            elseif Method == "FindPartOnRayWithWhitelist" and SilentAimSettings.SilentAimMethod == Method then
-                if ValidateArguments(Arguments, ExpectedArguments.FindPartOnRayWithWhitelist) then
-                    local Origin, Direction = computeRay(Arguments[2].Origin)
-                    Arguments[2] = Ray.new(Origin, Direction)
-                    return oldNamecall(unpack(Arguments))
-                end
-            elseif (Method == "FindPartOnRay" or Method == "findPartOnRay") and SilentAimSettings.SilentAimMethod:lower() == Method:lower() then
-                if ValidateArguments(Arguments, ExpectedArguments.FindPartOnRay) then
-                    local Origin, Direction = computeRay(Arguments[2].Origin)
-                    Arguments[2] = Ray.new(Origin, Direction)
-                    return oldNamecall(unpack(Arguments))
-                end
-            elseif Method == "Raycast" and SilentAimSettings.SilentAimMethod == Method then
-                if ValidateArguments(Arguments, ExpectedArguments.Raycast) then
-                    local Origin, Direction = computeRay(Arguments[2])
-                    Arguments[2], Arguments[3] = Origin, Direction
-                    return oldNamecall(unpack(Arguments))
-                end
-            elseif Method == "ViewportPointToRay" and SilentAimSettings.SilentAimMethod == Method then
-                if ValidateArguments(Arguments, ExpectedArguments.ViewportPointToRay) then
-                    local Origin = Camera.CFrame.p
+            if SilentAimSettings.SilentAimMethod == Method then
+                if Method == "Raycast" and ValidateArguments(Arguments, ExpectedArguments.Raycast) then
+                    local Origin = Arguments[2]
                     local NewOrigin, Direction = computeRay(Origin)
-                    return Ray.new(NewOrigin, Direction)
+                    Arguments[2] = NewOrigin
+                    Arguments[3] = Direction
+                    return oldNamecall(unpack(Arguments))
+                elseif Method == "ViewportPointToRay" and SilentAimSettings.SilentAimMethod == Method then
+                    if ValidateArguments(Arguments, ExpectedArguments.ViewportPointToRay) then
+                        local Origin = Camera.CFrame.p
+                        local NewOrigin, Direction = computeRay(Origin)
+                        return Ray.new(NewOrigin, Direction)
+                    end
+                elseif Method == "ScreenPointToRay" and SilentAimSettings.SilentAimMethod == Method then
+                    if ValidateArguments(Arguments, ExpectedArguments.ScreenPointToRay) then
+                        local Origin = Camera.CFrame.p
+                        local NewOrigin, Direction = computeRay(Origin)
+                        return Ray.new(NewOrigin, Direction)
+                    end
+                elseif Method == "FindPartOnRayWithIgnoreList" and SilentAimSettings.SilentAimMethod == "CounterBlox" then
+                    local Origin, Direction = computeRay(Arguments[2].Origin)
+                    Arguments[2] = Ray.new(Origin, Direction)
+                    return oldNamecall(unpack(Arguments))
                 end
-            elseif Method == "ScreenPointToRay" and SilentAimSettings.SilentAimMethod == Method then
-                if ValidateArguments(Arguments, ExpectedArguments.ScreenPointToRay) then
-                    local Origin = Camera.CFrame.p
-                    local NewOrigin, Direction = computeRay(Origin)
-                    return Ray.new(NewOrigin, Direction)
-                end
-            elseif Method == "FindPartOnRayWithIgnoreList" and SilentAimSettings.SilentAimMethod == "CounterBlox" then
-                local Origin, Direction = computeRay(Arguments[2].Origin)
-                Arguments[2] = Ray.new(Origin, Direction)
-                return oldNamecall(unpack(Arguments))
             end
         end
     end
@@ -2136,8 +1918,8 @@ end)
 local VisualsEx = VisualsTab:AddLeftGroupbox("ESP")
 
 if not _G.ExunysESPLoaded then
-    pcall(function() 
-     loadstring(game:HttpGet("https://raw.githubusercontent.com/anmultv1234/FinalRound/refs/heads/main/ExLib.lua"))()
+    pcall(function()
+        loadstring(game:HttpGet("https://raw.githubusercontent.com/anmultv1234/FinalRound/refs/heads/main/ExLib.lua"))()
     end)
 end
 
@@ -2146,7 +1928,12 @@ if not ESP then
     ESP = {
         Settings = {},
         Properties = {
-            ESP = { DisplayVehicle = true },
+            ESP = { 
+                DisplayVehicle = true,
+                Size = 13,
+                Font = (Drawing and Drawing.Fonts and Drawing.Fonts.Monospace) or 3,
+                Outline = true
+            },
             Tracer = {},
             HeadDot = {},
             Box = {},
@@ -2364,10 +2151,10 @@ addDefinitionControls(ESPVisualGroup, {
     {Type = "slider", Name = "Offset", Path = {"Properties", "ESP", "Offset"}, Min = 0, Max = 50, Rounding = 0},
     {Type = "color", Name = "Color", Path = {"Properties", "ESP", "Color"}},
     {Type = "slider", Name = "Transparency", Path = {"Properties", "ESP", "Transparency"}, Min = 0, Max = 1, Rounding = 2},
-    {Type = "slider", Name = "Size", Path = {"Properties", "ESP", "Size"}, Min = 10, Max = 30, Rounding = 0},
-    {Type = "dropdown", Name = "Font", Path = {"Properties", "ESP", "Font"}, Values = fontValues, Map = fontMap, OnChange = refreshESPConfiguration},
+    {Type = "slider", Name = "Size", Path = {"Properties", "ESP", "Size"}, Min = 10, Max = 30, Rounding = 0, Default = 13},
+    {Type = "dropdown", Name = "Font", Path = {"Properties", "ESP", "Font"}, Values = fontValues, Map = fontMap, Default = "Monospace", OnChange = refreshESPConfiguration},
     {Type = "color", Name = "Outline Color", Path = {"Properties", "ESP", "OutlineColor"}},
-    {Type = "toggle", Name = "Outline", Path = {"Properties", "ESP", "Outline"}},
+    {Type = "toggle", Name = "Outline", Path = {"Properties", "ESP", "Outline"}, Default = true},
     {Type = "toggle", Name = "Display Distance", Path = {"Properties", "ESP", "DisplayDistance"}},
     {Type = "toggle", Name = "Display Health", Path = {"Properties", "ESP", "DisplayHealth"}},
     {Type = "toggle", Name = "Display Name", Path = {"Properties", "ESP", "DisplayName"}},
@@ -2806,31 +2593,18 @@ local function applyGunSettings(weapon, property, value)
 
     if property == "Mode" then
         weapon:SetAttribute("Mode", value)
-        local settingsModule = findSettingsModuleForWeapon(weapon, "Mode")
 
+        local settingsModule = findSettingsModuleForWeapon(weapon, "Mode")
         if settingsModule then
             local success, module = pcall(require, settingsModule)
             if success and type(module) == "table" then
                 module.Mode = value
                 if module.CurrentFireMode then module.CurrentFireMode = value end
-
-                -- FireModes 서브테이블 동기화 (표시/판정용)
-                if type(module.FireModes) == "table" then
-                    for key in pairs(module.FireModes) do
-                        module.FireModes[key] = false
+                if module.FireModes and type(module.FireModes) == "table" then
+                    for k, v in pairs(module.FireModes) do
+                        module.FireModes[k] = false
                     end
-                    if module.FireModes[value] ~= nil then
-                        module.FireModes[value] = true
-                    end
-                end
-
-                -- ⭐ 핵심: 서버에 새 Settings 스냅샷을 재전송하기 위한 강제 재장착
-                local character = weapon.Parent
-                if character and character:FindFirstChildOfClass("Humanoid") then
-                    local humanoid = character.Humanoid
-                    humanoid:UnequipTools()
-                    task.wait(0.15)
-                    humanoid:EquipTool(weapon)
+                    module.FireModes[value] = true
                 end
             end
         end
@@ -2922,6 +2696,26 @@ ACSEngineBox:AddDropdown("WeaponModifyMethod", {
     Callback = function(value)
         getgenv().WeaponModifyMethod = value
     end
+})
+
+ACSEngineBox:AddToggle("Spoof_Enabled", {
+    Text = "Enable Fire Spoofer",
+    Default = false,
+    Callback = function(value) ScriptState.Spoof_Enabled = value end
+})
+
+ACSEngineBox:AddDropdown("Spoof_Mode", {
+    Text = "Spoof Fire Mode",
+    Default = "Auto",
+    Values = {"Auto", "Semi", "Burst"},
+    Callback = function(value) ScriptState.Spoof_Mode = value end
+})
+
+ACSEngineBox:AddInput("Spoof_FireRate", {
+    Text = "Spoof Fire Rate",
+    Default = "8888",
+    Numeric = true,
+    Callback = function(value) ScriptState.Spoof_FireRate = tonumber(value) or 8888 end
 })
 
 ACSEngineBox:AddButton('INF AMMO', function()
@@ -3106,93 +2900,177 @@ for _, gui in ipairs(PlayerGui:GetChildren()) do
     task.spawn(autoApplyGUIWeapon, gui)
 end
 
-local targetStrafe = GeneralTab:AddLeftGroupbox("Target Strafe")
-ScriptState.strafeSpeed, ScriptState.strafeRadius = 50, 5
-ScriptState.strafeMode, ScriptState.strafeTargetPart = "Horizontal", nil
-local function startTargetStrafe()
-    local targetPart = getClosestPlayer()
-    ScriptState.strafeTargetPart = targetPart
-    if ScriptState.strafeTargetPart and ScriptState.strafeTargetPart.Parent then
-        ScriptState.originalCameraMode = Players.LocalPlayer.CameraMode
-        Players.LocalPlayer.CameraMode = Enum.CameraMode.Classic
-        local targetPos = ScriptState.strafeTargetPart.Position
-        LocalPlayer.Character:SetPrimaryPartCFrame(CFrame.new(targetPos))
-        Camera.CameraSubject = ScriptState.strafeTargetPart.Parent:FindFirstChild("Humanoid")
-    end
-end
+local AACBox = GeneralTab:AddLeftGroupbox("Advanced Auto Combat")
 
-local function strafeAroundTarget()
-    if not (ScriptState.strafeTargetPart and ScriptState.strafeTargetPart.Parent) then return end
-    local targetPos = ScriptState.strafeTargetPart.Position
-    local angle = tick() * (ScriptState.strafeSpeed / 10)
-    local offset = ScriptState.strafeMode == "Horizontal"
-        and Vector3.new(math.cos(angle) * ScriptState.strafeRadius, 0, math.sin(angle) * ScriptState.strafeRadius)
-        or Vector3.new(math.cos(angle) * ScriptState.strafeRadius, ScriptState.strafeRadius, math.sin(angle) * ScriptState.strafeRadius)
-    LocalPlayer.Character:SetPrimaryPartCFrame(CFrame.new(targetPos + offset))
-    LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(LocalPlayer.Character.HumanoidRootPart.Position, targetPos)
-end
+ScriptState.AAC_State = "Idle"
+ScriptState.stopFrameCount = 0
+ScriptState.lastMoveDirection = Vector3.zero
+ScriptState.lastRootPosition = nil
 
-local function stopTargetStrafe()
-    Players.LocalPlayer.CameraMode = ScriptState.originalCameraMode or Enum.CameraMode.Classic
-    Camera.CameraSubject = LocalPlayer.Character.Humanoid
-    ScriptState.strafeEnabled, ScriptState.strafeTargetPart = false, nil
-end
-targetStrafe:AddToggle("strafeToggle", {
-    Text = "Target Strafe",
-    Default = false,
-    Tooltip = "Enable or disable Target Strafe.",
-    Callback = function(value)
-        ScriptState.strafeEnabled = value
-        if ScriptState.strafeEnabled then
-            startTargetStrafe()
-        else
-            stopTargetStrafe()
-        end
-    end
-}):AddKeyPicker("strafeToggleKey", {
+AACBox:AddDropdown("AAC_Mode", {
+    Text = "Mode",
+    Default = "PatZoom",
+    Values = {"PatZoom", "Lean"}
+})
+
+AACBox:AddInput("AAC_ShieldName", {
+    Text = "Shield Tool Name",
+    Default = "",
+    Callback = function(value) ScriptState.AAC_ShieldName = value end
+})
+
+AACBox:AddInput("AAC_GunName", {
+    Text = "Gun Tool Name",
+    Default = "",
+    Callback = function(value) ScriptState.AAC_GunName = value end
+})
+
+AACBox:AddSlider("AAC_Delay", {
+    Text = "PatZoom Delay",
+    Default = 0.05,
+    Min = 0,
+    Max = 0.2,
+    Rounding = 2
+})
+
+AACBox:AddLabel("Combo Keybind"):AddKeyPicker("AAC_ActivateKey", {
     Default = "None",
-    SyncToggleState = true,
+    SyncToggleState = false,
     Mode = "Toggle",
-    Text = "Target Strafe",
-    Tooltip = "Key to toggle Target Strafe",
-    Callback = function(value)
-        ScriptState.strafeEnabled = value
-        if ScriptState.strafeEnabled then
-            startTargetStrafe()
+    Text = "AAC Combo",
+    Callback = function(state)
+        if state then
+            ScriptState.AAC_State = "Initializing"
+            ScriptState.stopFrameCount = 0
+            ScriptState.lastMoveDirection = Vector3.zero
         else
-            stopTargetStrafe()
+            ScriptState.AAC_State = "Idle"
         end
     end
 })
 
-targetStrafe:AddDropdown("strafeModeDropdown", {
-    AllowNull = false,
-    Text = "Target Strafe Mode",
-    Default = "Horizontal",
-    Values = {"Horizontal", "UP"},
-    Tooltip = "Select the strafing mode.",
-    Callback = function(value) ScriptState.strafeMode = value end
-})
+local function equipToolFromBackpack(toolName)
+    if toolName == "" then return end
+    local tool = LocalPlayer.Backpack:FindFirstChild(toolName)
+    if tool then
+        local settingsModule
+        for _, m in ipairs(tool:GetDescendants()) do
+            if m:IsA("ModuleScript") and m.Name == "Settings" then
+                settingsModule = m
+                break
+            end
+        end
+        local ok, modTable = false, {}
+        if settingsModule then
+            ok, modTable = pcall(require, settingsModule)
+        end
+        local Event = game:GetService("ReplicatedStorage"):FindFirstChild("ACS_Engine")
+        if Event then
+            Event = Event:FindFirstChild("Events")
+            if Event then
+                Event = Event:FindFirstChild("Equip")
+                if Event then
+                    Event:FireServer(tool, ok and type(modTable) == "table" and modTable or {})
+                end
+            end
+        end
+    end
+end
 
-targetStrafe:AddSlider("strafeRadiusSlider", {
-    Text = "Strafe Radius",
-    Default = 5,
-    Min = 1,
-    Max = 20,
-    Rounding = 1,
-    Tooltip = "Set the radius of movement around the target.",
-    Callback = function(value) ScriptState.strafeRadius = value end
-})
+local function executeAACCombo()
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChild("Humanoid")
+    if not (root and hum) then return end
 
-targetStrafe:AddSlider("strafeSpeedSlider", {
-    Text = "Strafe Speed",
-    Default = 50,
-    Min = 10,
-    Max = 200,
-    Rounding = 1,
-    Tooltip = "Set the speed of strafing around the target.",
-    Callback = function(value) ScriptState.strafeSpeed = value end
-})
+    if Options.AAC_Mode.Value == "PatZoom" then
+        equipToolFromBackpack(ScriptState.AAC_ShieldName)
+        task.wait(0.1)
+
+        local FreefallRemote = game:GetService("ReplicatedStorage"):FindFirstChild("Freefall")
+        if FreefallRemote then FreefallRemote:FireServer(false) end
+        
+        task.wait(Options.AAC_Delay.Value)
+        
+        equipToolFromBackpack(ScriptState.AAC_GunName)
+        task.wait(0.1)
+        
+        local oldSilent = SilentAimSettings.Enabled
+        local oldLock = ScriptState.lockEnabled
+        SilentAimSettings.Enabled = true
+        ScriptState.lockEnabled = true
+
+        VIM:SendMouseButtonEvent(0, 0, 1, true, game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(0, 0, 1, false, game, 0)
+
+        SilentAimSettings.Enabled = oldSilent
+        ScriptState.lockEnabled = oldLock
+        
+    elseif Options.AAC_Mode.Value == "Lean" then
+        equipToolFromBackpack(ScriptState.AAC_ShieldName)
+        task.wait(0.1)
+        
+        local isLeft = ScriptState.lastMoveDirection.X < 0
+        local leanVal = isLeft and -1 or 1
+        local StanceRemote = game:GetService("ReplicatedStorage"):FindFirstChild("ACS_Engine")
+        if StanceRemote then
+            StanceRemote = StanceRemote:FindFirstChild("Events")
+            if StanceRemote then
+                StanceRemote = StanceRemote:FindFirstChild("Stance")
+                if StanceRemote then StanceRemote:FireServer(0, leanVal) end
+            end
+        end
+        
+        task.wait(0.05)
+        equipToolFromBackpack(ScriptState.AAC_GunName)
+        task.wait(0.1)
+        
+        VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+        task.wait(0.05)
+        VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+        task.wait(0.05)
+        
+        if StanceRemote then StanceRemote:FireServer(0, 0) end
+    end
+    
+    if Options.AAC_ActivateKey and Options.AAC_ActivateKey.Mode == "Toggle" then
+    end
+    ScriptState.AAC_State = "Idle"
+end
+
+RunService.Heartbeat:Connect(function()
+    if ScriptState.AAC_State ~= "Initializing" then return end
+    
+    local char = LocalPlayer.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChild("Humanoid")
+    
+    if root and hum then
+        if hum.MoveDirection.Magnitude > 0 then
+            ScriptState.lastMoveDirection = hum.MoveDirection
+        end
+        
+        local currentPos = root.Position
+        if ScriptState.lastRootPosition then
+            if (currentPos - ScriptState.lastRootPosition).Magnitude < 0.1 then
+                ScriptState.stopFrameCount = ScriptState.stopFrameCount + 1
+            else
+                ScriptState.stopFrameCount = 0
+            end
+        end
+        ScriptState.lastRootPosition = currentPos
+
+        if ScriptState.stopFrameCount >= 5 then
+            ScriptState.AAC_State = "Executing"
+            task.spawn(executeAACCombo)
+        end
+    end
+end)
 
 local keybindWatchers = {}
 
@@ -3254,7 +3132,6 @@ registerKeybindWatcher("silentAimEnabled", "silentAim_KeyPicker", {
 registerKeybindWatcher("speedEnabled", "speedToggleKey")
 registerKeybindWatcher("flyEnabled", "flyToggleKey")
 registerKeybindWatcher("noClipEnabled", "noClipToggleKey")
-registerKeybindWatcher("strafeToggle", "strafeToggleKey")
 
 RunService.RenderStepped:Connect(function()
     for _, watcher in ipairs(keybindWatchers) do
@@ -3276,12 +3153,6 @@ RunService.RenderStepped:Connect(function()
                 watcher.stateChanged(state)
             end
         end
-    end
-end)
-
-RunService.RenderStepped:Connect(function()
-    if ScriptState.strafeEnabled then
-        strafeAroundTarget()
     end
 end)
 
@@ -3332,6 +3203,94 @@ task.spawn(function()
                             v.CanCollide = false
                         end
                     end
+                end
+            end
+        end
+    end
+end)
+
+local RageBox = RageTab:AddLeftGroupbox("Anti Rpg Spam")
+
+RageBox:AddToggle("AntiRpgSpam_Enabled", {
+    Text = "Enabled",
+    Default = false,
+    Callback = function(value)
+        if not value then
+            ScriptState.isLockedOn = false
+            ScriptState.targetPlayer = nil
+            if ScriptState.OldSilentAim then
+                SilentAimSettings.Enabled = ScriptState.OldSilentAim.Enabled
+                SilentAimSettings.BulletTP = ScriptState.OldSilentAim.BulletTP
+            end
+        else
+            ScriptState.OldSilentAim = {
+                Enabled = SilentAimSettings.Enabled,
+                BulletTP = SilentAimSettings.BulletTP
+            }
+        end
+    end
+})
+
+RageBox:AddDropdown("AntiRpgSpam_Target", {
+    SpecialType = "Player",
+    Text = "Select Target",
+    Multi = false
+})
+
+local AntiRpgParams = RaycastParams.new()
+AntiRpgParams.FilterType = Enum.RaycastFilterType.Blacklist
+AntiRpgParams.IgnoreWater = true
+
+RunService.Heartbeat:Connect(function()
+    if not Toggles.AntiRpgSpam_Enabled.Value then return end
+    
+    local targetName = Options.AntiRpgSpam_Target.Value
+    if not targetName or targetName == "" then return end
+    
+    local targetPlayer = Players:FindFirstChild(targetName)
+    if not targetPlayer then return end
+    
+    local char = LocalPlayer.Character
+    local myRoot = char and char:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+
+    local targetChar = targetPlayer.Character
+    local targetRoot = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+
+    if targetRoot then
+        task.spawn(function()
+            pcall(function()
+                LocalPlayer:RequestStreamAroundAsync(targetRoot.Position)
+            end)
+        end)
+        
+        local dist = (targetRoot.Position - myRoot.Position).Magnitude
+        local dir = (targetRoot.Position - myRoot.Position).Unit
+        
+        if dist > 8000 then
+            myRoot.CFrame = myRoot.CFrame + dir * ScriptState.flySpeed
+        elseif dist < 4000 then
+            myRoot.CFrame = myRoot.CFrame - dir * ScriptState.flySpeed
+        end
+
+        ScriptState.isLockedOn = true
+        ScriptState.targetPlayer = targetPlayer
+        SilentAimSettings.Enabled = true
+        SilentAimSettings.BulletTP = true
+        
+        AntiRpgParams.FilterDescendantsInstances = {char}
+        local origin = Camera.CFrame.Position
+        local direction = (targetRoot.Position - origin).Unit * 8000
+        
+        local result = Workspace:Raycast(origin, direction, AntiRpgParams)
+        if result and result.Instance then
+            local model = result.Instance:FindFirstAncestorOfClass("Model")
+            if model and model == targetChar then
+                local hum = model:FindFirstChild("Humanoid")
+                if hum and hum.Health > 0 and dist >= 4000 and dist <= 8000 then
+                    VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+                    task.wait(0.01)
+                    VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
                 end
             end
         end
